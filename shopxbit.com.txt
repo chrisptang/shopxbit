@@ -1,0 +1,1 @@
+ssh -i "rsa-sg-dt-2022-03-23.cer" ubuntu@13.229.95.26

@@ -1,0 +1,1 @@
+certonly --manual --preferred-challenges dns --email dt@shopxbit.com --domains shopxbit.com *.shopxbit.com

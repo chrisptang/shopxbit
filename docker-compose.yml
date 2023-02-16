@@ -1,0 +1,202 @@
+# ptang
+
+version: '3'
+
+services:
+  cat:
+    image: chrisptang/cat:latest
+    container_name: cat
+    restart: always
+    environment:
+      - SERVER_IP=$HOST_IP
+      - MYSQL_URL=apollo-db
+      - MYSQL_PORT=3306
+      - MYSQL_USERNAME=middleware
+      - MYSQL_PASSWD=shopxbit-local
+      - MYSQL_SCHEMA=cat_db
+      - CAT_HTTP_PORT=30000
+      - CAT_WEB_SERVER=$HOST_IP:30000
+      - CAT_ADMIN_PWD=shopxbit-1qaz!QAZ
+      - JVM_OPTS=-Xmx1g -Xms1g -XX:+UseConcMarkSweepGC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/usr/local/tomcat/logs/heap_dump
+    working_dir: /app
+    depends_on: 
+      - apollo-db
+    ports:
+      - "30000:8080"
+      - "2280:2280"
+
+  zookeeper:
+    image: zookeeper:3.5.8
+    hostname: zookeeper
+    restart: always
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+      - "30005:8080"
+    volumes: 
+      - ./data/zookeeper:/data
+      - ./data/logs/zookeeper/logs:/logs
+      - ./data/logs/zookeeper/datalog:/datalog
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+      - ZOOKEEPER_TICK_TIME=2000
+      - ZOOKEEPER_SNAPSHOT_TRUST_EMPTY=true
+      - ZOO_LOG4J_PROP=INFO,ROLLINGFILE
+      - ZOO_LOG_DIR=/logs
+
+  dubbo-admin:
+    image: chrisptang/dubbo-admin:0.3.0
+    container_name: dubbo-admin
+    restart: always
+    depends_on:
+      - zookeeper
+    ports:
+      - "30001:8080"
+    environment:
+      - admin.registry.address=zookeeper://zookeeper:2181
+      - admin.config-center=zookeeper://zookeeper:2181
+      - admin.metadata-report.address=zookeeper://zookeeper:2181
+      - admin.root.user.name=admin
+      - admin.root.user.password=shopxbit-1qaz!QAZ
+      # - JAVA_OPTS=-Xdebug -Xrunjdwp:transport=dt_socket,suspend=n,server=y,address=7505
+
+  apllo-portal:
+    image: apolloconfig/apollo-portal:1.7.1
+    container_name: apollo-portal
+    restart: always
+    depends_on: 
+      - apollo-db
+      - apollo-adminservice
+      - apollo-configservice
+    ports: 
+      - "30002:8070"
+    environment: 
+      - SPRING_DATASOURCE_URL=jdbc:mysql://apollo-db:3306/ApolloPortalDB?characterEncoding=utf8
+      - SPRING_DATASOURCE_USERNAME=middleware
+      - SPRING_DATASOURCE_PASSWORD=shopxbit-local
+      - JAVA_OPTS=-server -Xms512m -Xmx512m -Xss256k -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=384m -XX:SurvivorRatio=8
+      - DEV_META=http://$HOST_IP:30004
+      - APOLLO_PORTAL_ENVS=dev
+    
+
+  apollo-adminservice:
+    image: apolloconfig/apollo-adminservice:1.7.1
+    container_name: apollo-adminservice
+    restart: always
+    depends_on: 
+      - apollo-db
+      - apollo-configservice
+    ports: 
+      - "8090:8090"
+    environment: 
+      - SPRING_DATASOURCE_URL=jdbc:mysql://apollo-db:3306/ApolloConfigDB?characterEncoding=utf8
+      - SPRING_DATASOURCE_USERNAME=middleware
+      - SPRING_DATASOURCE_PASSWORD=shopxbit-local
+      - JAVA_OPTS=-server -Deureka.instance.prefer-ip-address=true -Deureka.instance.ip-address=$HOST_IP -Xms512m -Xmx512m -Xss256k -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=384m -XX:SurvivorRatio=8
+      - hostname=$HOST_IP
+      - eureka.service.url=http://$HOST_IP:30004/eureka/
+
+  apollo-configservice:
+    image: apolloconfig/apollo-configservice:1.7.1
+    container_name: apollo-configservice
+    restart: always
+    depends_on: 
+      - apollo-db
+    ports: 
+      - "30004:8080"
+    environment: 
+      - SPRING_DATASOURCE_URL=jdbc:mysql://apollo-db:3306/ApolloConfigDB?characterEncoding=utf8
+      - SPRING_DATASOURCE_USERNAME=middleware
+      - SPRING_DATASOURCE_PASSWORD=shopxbit-local
+      - hostname=$HOST_IP
+      - JAVA_OPTS=-server -Deureka.instance.prefer-ip-address=true -Deureka.instance.ip-address=$HOST_IP -Xms512m -Xmx512m -Xss256k -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=384m -XX:SurvivorRatio=8
+
+  xxl-job:
+    image: chrisptang/xxl-job:latest
+    container_name: xxl-job-admin
+    restart: always
+    depends_on:
+      - apollo-db
+      - apollo-configservice
+    environment:
+      - TZ=Asia/Shanghai
+      - PARAMS=--spring.datasource.url=jdbc:mysql://apollo-db:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai --spring.datasource.username=middleware --spring.datasource.password=shopxbit-local --xxl.job.login.username=admin --xxl.job.login.password=shopxbit-1qaz!QAZ
+      - JAVA_OPTS=-Xmx256m -Dminiso.infra.cat.servers=$HOST_IP -Dleqee.apollo.server=http://$HOST_IP:30004
+      - DEPLOY_ENV=dev
+      - SERVER_IP=$HOST_IP
+      - DINGTALK_BOT_URL=https://oapi.dingtalk.com/robot/send?access_token=replace_me
+    ports:
+      - 30003:8080
+
+  apollo-db:
+    image: mysql:8.0.25
+    container_name: apollo-db
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: shopxbit-local
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./init_sql:/docker-entrypoint-initdb.d
+      - ./db_conf/master.cnf:/etc/mysql/mysql.conf.d/mysqld.cnf
+      - ./data/logs/mysql:/var/log/mysql
+      - ./data/mysql:/var/lib/mysql
+    # volumes_from:
+    #   - apollo-dbdata
+
+  # apollo-dbdata:
+  #   image: alpine:latest
+  #   container_name: apollo-dbdata
+  #   volumes:
+  #     - /var/lib/mysql
+
+  # redis:
+  #   image: redis:6-alpine
+  #   restart: always
+  #   container_name: redis
+  #   volumes: 
+  #     - ./data/redis:/data
+  #   ports: 
+  #     - "6379:6379"
+
+  # mongodb:
+  #   image: mongo:latest
+  #   restart: always
+  #   container_name: mongodb
+  #   environment:
+  #     MONGO_INITDB_ROOT_USERNAME: root
+  #     MONGO_INITDB_ROOT_PASSWORD: mongo-toor
+  #   ports: 
+  #     - "27017:27017"
+  #   volumes: 
+  #     - /data/mongodb:/data
+
+  # mongo-express:
+  #   image: mongo-express:latest
+  #   container_name: mongo-express
+  #   restart: always
+  #   depends_on: 
+  #     - mongodb
+  #   ports:
+  #     - 8081:8081
+  #   environment:
+  #     ME_CONFIG_MONGODB_SERVER: mongodb
+  #     ME_CONFIG_MONGODB_ADMINUSERNAME: root
+  #     ME_CONFIG_MONGODB_ADMINPASSWORD: mongo-toor
+
+  sqlpad:
+    image: chrisptang/sqlpad:6.7.1
+    container_name: sqlpad
+    restart: always
+    volumes: 
+      - ./data/sqlpad:/var/lib/sqlpad
+    ports: 
+      - 4080:3000
+    links: 
+      - apollo-db  
+    environment: 
+      SQLPAD_ADMIN: 'user@shopxbit.com'
+      SQLPAD_ADMIN_PASSWORD: 'shopxbit-1qaz!QAZ'
+      SQLPAD_APP_LOG_LEVEL: info
+      SQLPAD_WEB_LOG_LEVEL: warn
